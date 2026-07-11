@@ -70,10 +70,8 @@ const filterRuleGroups = ref<FilterRuleGroup[]>([])
 // 查询所有站点
 async function querySites() {
   try {
-    const data: Site[] = await api.get('site/')
-
-    // 过滤站点，只有启用的站点才显示
-    allSites.value = data.filter(item => item.is_active)
+    const data: any[] = await api.get('site/indexsites')
+    allSites.value = data
   } catch (error) {
     console.log(error)
   }
@@ -184,8 +182,81 @@ async function loadSystemSettings() {
   }
 }
 
+// Jackett 配置数据
+const jackettConfig = ref({
+  host: '',
+  api_key: '',
+  password: '',
+})
+
+// 连接测试中标记
+const testingJackett = ref(false)
+
+// 查询 Jackett 配置
+async function loadJackettConfig() {
+  try {
+    const result: { [key: string]: any } = await api.get('system/setting/Jackett')
+    if (result.success && result.data?.value) {
+      jackettConfig.value = {
+        host: result.data.value.host ?? '',
+        api_key: result.data.value.api_key ?? '',
+        password: result.data.value.password ?? '',
+      }
+    }
+  } catch (error) {
+    console.log(error)
+  }
+}
+
+// 保存 Jackett 配置
+async function saveJackettConfig() {
+  try {
+    const result: { [key: string]: any } = await api.post('system/setting/Jackett', jackettConfig.value)
+    if (result.success) {
+      $toast.success('Jackett 配置保存成功')
+      await querySites()
+    } else {
+      $toast.error(`Jackett 配置保存失败：${result.message}！`)
+    }
+  } catch (error) {
+    console.log(error)
+    $toast.error('Jackett 配置保存失败！')
+  }
+}
+
+// 测试 Jackett 连通性
+async function testJackett() {
+  if (!jackettConfig.value.host || !jackettConfig.value.api_key) {
+    $toast.warning('请先填写 Jackett 地址和 API Key')
+    return
+  }
+  testingJackett.value = true
+  try {
+    // 自动保存当前修改值
+    const saveRes: { [key: string]: any } = await api.post('system/setting/Jackett', jackettConfig.value)
+    if (!saveRes.success) {
+      $toast.error('保存临时配置失败，测试中断！')
+      testingJackett.value = false
+      return
+    }
+    // 测试连通性
+    const result: { [key: string]: any } = await api.get('system/moduletest/jackett')
+    if (result.success) {
+      $toast.success(result.message || '连接测试成功')
+      await querySites()
+    } else {
+      $toast.error(result.message || '连接测试失败，请检查配置或网络')
+    }
+  } catch (error) {
+    console.log(error)
+    $toast.error('连接测试发生异常')
+  } finally {
+    testingJackett.value = false
+  }
+}
+
 async function loadPageData() {
-  await Promise.all([querySites(), queryFilterRuleGroups(), querySelectedSites(), loadSearchSetting(), loadSystemSettings()])
+  await Promise.all([querySites(), queryFilterRuleGroups(), querySelectedSites(), loadSearchSetting(), loadSystemSettings(), loadJackettConfig()])
 }
 
 onMounted(() => {
@@ -278,6 +349,60 @@ useSilentSettingRefresh(loadPageData, {
             <div class="d-flex flex-wrap gap-4 mt-4">
               <VBtn type="submit" @click="saveSearchSetting" prepend-icon="mdi-content-save">
                 {{ t('common.save') }}
+              </VBtn>
+            </div>
+          </VForm>
+        </VCardText>
+      </VCard>
+    </VCol>
+  </VRow>
+  <VRow>
+    <VCol cols="12">
+      <VCard>
+        <VCardItem>
+          <VCardTitle>Jackett 配置</VCardTitle>
+          <VCardSubtitle>配置 Jackett 索引器以检索公网/私有 BT 资源</VCardSubtitle>
+        </VCardItem>
+        <VCardText>
+          <VRow>
+            <VCol cols="12" md="4">
+              <VTextField
+                v-model="jackettConfig.host"
+                label="Jackett 地址"
+                placeholder="http://127.0.0.1:9117"
+                persistent-hint
+                prepend-inner-icon="mdi-server"
+              />
+            </VCol>
+            <VCol cols="12" md="4">
+              <VTextField
+                v-model="jackettConfig.api_key"
+                label="API Key"
+                placeholder="请输入 Jackett 的 API Key"
+                persistent-hint
+                prepend-inner-icon="mdi-key"
+              />
+            </VCol>
+            <VCol cols="12" md="4">
+              <VTextField
+                v-model="jackettConfig.password"
+                type="password"
+                label="Jackett 密码"
+                placeholder="若设置了访问密码请输入，否则留空"
+                persistent-hint
+                prepend-inner-icon="mdi-lock"
+              />
+            </VCol>
+          </VRow>
+        </VCardText>
+        <VCardText>
+          <VForm @submit.prevent="() => {}">
+            <div class="d-flex flex-wrap gap-4 mt-4">
+              <VBtn type="submit" @click="saveJackettConfig" prepend-icon="mdi-content-save">
+                {{ t('common.save') }}
+              </VBtn>
+              <VBtn color="info" variant="outlined" :loading="testingJackett" @click="testJackett" prepend-icon="mdi-swap-horizontal">
+                测试连接
               </VBtn>
             </div>
           </VForm>
