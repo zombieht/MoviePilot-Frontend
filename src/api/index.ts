@@ -10,6 +10,22 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
 })
 
+// 屏蔽 Axios 的 Cancel 错误日志，避免在路由切换等中断请求时控制台打印大量 "canceled" 的红字报错
+const originConsoleError = console.error
+console.error = (...args) => {
+  if (args[0]) {
+    const isCancelError =
+      axios.isCancel(args[0]) ||
+      args[0].name === 'CanceledError' ||
+      args[0].message === 'canceled' ||
+      args[0].message === 'Request cancelled'
+    if (isCancelError) {
+      return
+    }
+  }
+  originConsoleError.apply(console, args)
+}
+
 export interface ConnectionAwareRequestConfig extends AxiosRequestConfig {
   skipConnectionTracking?: boolean
 }
@@ -83,7 +99,10 @@ api.interceptors.response.use(
     globalOfflineStatus.markServerOnline()
     return normalizeLocalizedMessage(response.data)
   },
-  (error: AxiosError) => {
+  (error: any) => {
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
     if (!error.response) {
       const requestConfig = error.config as ConnectionAwareRequestConfig | undefined
       const failureReason = resolveConnectionFailureReason(error)
